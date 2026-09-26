@@ -22,6 +22,42 @@ export function buildFrameRange(startFrame: number, durationSec: number, fps: nu
   return { startFrame: start, endFrame: start + count - 1, frameCount: count };
 }
 
+/** 每帧拍摄张数的最小入参（FrameEntry 或任何带 shotCount 的行） */
+export interface ShotCountInput {
+  shotCount: number;
+}
+
+/** 一段帧序的总拍摄张数：逐帧累加 shotCount，非法值按 1 张计 */
+export function totalShotCount(frames: ShotCountInput[]): number {
+  return frames.reduce((sum, f) => {
+    const n = Number.isFinite(f.shotCount) && f.shotCount > 0 ? Math.floor(f.shotCount) : 1;
+    return sum + n;
+  }, 0);
+}
+
+/**
+ * 由帧条目推导镜头计划：每帧的拍摄张数参与计划。
+ * 计划张数 = 逐帧张数之和；时长 = 计划张数 ÷ 帧率；
+ * 帧区间按张数展开（每张占一个成片帧位），结束帧号 = 起始帧号 + 计划张数 - 1。
+ */
+export function planFromFrames(frames: ShotCountInput[], startFrame: number, fps: number) {
+  const start = Number.isFinite(startFrame) && startFrame >= 1 ? Math.floor(startFrame) : 1;
+  const totalShots = Math.max(1, totalShotCount(frames));
+  return {
+    startFrame: start,
+    endFrame: start + totalShots - 1,
+    frameCount: frames.length,
+    totalShots,
+    durationSec: framesToDuration(totalShots, fps),
+  };
+}
+
+/** 镜头记录上的计划张数：帧区间包含的帧位数（详情 / 总览 / 实拍记录统一口径） */
+export function plannedFramesOf(shot: { startFrame: number; endFrame: number }): number {
+  if (!Number.isFinite(shot.startFrame) || !Number.isFinite(shot.endFrame)) return 1;
+  return Math.max(1, Math.floor(shot.endFrame) - Math.floor(shot.startFrame) + 1);
+}
+
 /** 秒 → 时间码 00:00:00.000 风格的可读文本 */
 export function secondsToTimecode(seconds: number): string {
   const total = Math.max(0, Math.round(seconds * 1000));

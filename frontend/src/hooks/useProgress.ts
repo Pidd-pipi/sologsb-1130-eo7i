@@ -5,7 +5,7 @@
 import { computed, ref } from 'vue';
 import * as api from '../db/api';
 import { useShotStore } from '../stores/shotStore';
-import { durationToFrames } from '../utils/frameMath';
+import { plannedFramesOf } from '../utils/frameMath';
 import type { Shot } from '../types/shot';
 import type { TakeLog, WasteBucket } from '../types/take';
 import { createEmptyTake } from '../types/take';
@@ -37,7 +37,7 @@ export function useProgress() {
 
   const summaries = computed<ShotProgressSummary[]>(() =>
     shotStore.shots.map((shot) => {
-      const planned = durationToFrames(shot.durationSec, shot.fps);
+      const planned = plannedFramesOf(shot);
       const rows = takes.value.filter((t) => t.shotId === shot.id);
       const taken = rows.reduce((sum, r) => sum + (r.takenFrames || 0), 0);
       const wasted = rows.reduce((sum, r) => sum + (r.wastedFrames || 0), 0);
@@ -83,7 +83,7 @@ export function useProgress() {
   }
 
   function emptyTake(shot: Shot): TakeLog {
-    const planned = durationToFrames(shot.durationSec, shot.fps);
+    const planned = plannedFramesOf(shot);
     const rows = takes.value.filter((t) => t.shotId === shot.id);
     const taken = rows.reduce((sum, r) => sum + (r.takenFrames || 0), 0);
     const wasted = rows.reduce((sum, r) => sum + (r.wastedFrames || 0), 0);
@@ -93,7 +93,7 @@ export function useProgress() {
 
   /** 登记一条实拍记录，并回写镜头完成百分比 */
   async function registerTake(shot: Shot, date: string, takenFrames: number, wastedFrames: number) {
-    const planned = durationToFrames(shot.durationSec, shot.fps);
+    const planned = plannedFramesOf(shot);
     const rows = takes.value.filter((t) => t.shotId === shot.id);
     const prevTaken = rows.reduce((sum, r) => sum + (r.takenFrames || 0), 0);
     const prevWasted = rows.reduce((sum, r) => sum + (r.wastedFrames || 0), 0);

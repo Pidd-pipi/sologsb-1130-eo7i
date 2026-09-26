@@ -9,10 +9,10 @@ import { useRoute, useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useShotStore } from '../stores/shotStore';
 import { useFrameStore } from '../stores/frameStore';
-import { useFrameSequence } from '../hooks/useFrameSequence';
+import { useFrameSequence, type RangeSyncResult } from '../hooks/useFrameSequence';
 import { useProgress } from '../hooks/useProgress';
 import * as api from '../db/api';
-import { durationToFrames, estimateSpeed, framesToDuration } from '../utils/frameMath';
+import { estimateSpeed, framesToDuration, plannedFramesOf } from '../utils/frameMath';
 import { FIXATION_OPTIONS, type Fixation, type PropState } from '../types/prop';
 import { SHOT_STATUS_OPTIONS, type ShotStatus } from '../types/shot';
 import type { FrameEntry } from '../types/frame';
@@ -42,7 +42,7 @@ const notFound = ref(false);
 
 const shotId = computed(() => Number(route.params.id));
 const shot = computed(() => shotStore.byId(shotId.value));
-const planned = computed(() => (shot.value ? durationToFrames(shot.value.durationSec, shot.value.fps) : 0));
+const planned = computed(() => (shot.value ? plannedFramesOf(shot.value) : 0));
 const summary = computed(() => summaries.value.find((s) => s.shotId === shotId.value));
 const sceneProgress = computed(() =>
   shot.value ? framesToDuration(shot.value.endFrame - shot.value.startFrame + 1, shot.value.fps) : 0,
@@ -90,6 +90,15 @@ function flash(text: string) {
   }, 3200);
 }
 
+/** 重算结果反馈：已实拍超出新计划时说明超出张数并保留原计划 */
+function flashSync(result: RangeSyncResult | null | undefined, okText: string) {
+  if (result?.kept) {
+    flash(`新计划 ${result.planned} 张，已实拍 ${result.taken} 张，超出 ${result.overBy} 张，已保留原计划`);
+  } else {
+    flash(okText);
+  }
+}
+
 async function changeStatus(status: ShotStatus) {
   if (!shot.value) return;
   await shotStore.setStatus(shotId.value, status);
@@ -105,37 +114,42 @@ async function changeDuration(value: number) {
 async function changeFps(value: number) {
   if (!shot.value) return;
   await shotStore.update(shotId.value, { fps: value });
-  await syncShotRange();
-  flash('已按新帧率重排帧区间');
+  const result = await syncShotRange();
+  flashSync(result, '已按新帧率重排帧区间');
 }
 
 async function addFrameWithExposure() {
-  await insertAfter(selectedFrameNo.value ?? frames.value[frames.value.length - 1]?.frameNo ?? null);
+  const inserted = await insertAfter(selectedFrameNo.value ?? frames.value[frames.value.length - 1]?.frameNo ?? null);
   const last = frames.value[frames.value.length - 1];
-  if (last) {
-    await patch(last.frameNo, exposureDraft.value as Partial<FrameEntry>);
-    select(last.frameNo);
-  }
-  flash('已在帧序中插入一帧');
+  const patched = last ? await patch(last.frameNo, exposureDraft.value as Partial<FrameEntry>) : null;
+  if (last) select(last.frameNo);
+  flashSync(patched ?? inserted, '已在帧序中插入一帧并重算计划');
 }
 
 async function reorder(from: number, to: number) {
-  await move(from, to);
-  flash('已移动帧并重排序号');
+  const result = await move(from, to);
+  flashSync(result, '已移动帧并重排序号');
 }
 
 async function patchFrame(frameNo: number, value: Partial<FrameEntry>) {
-  await patch(frameNo, value);
+  const result = await patch(frameNo, value);
+  if (result?.kept) flashSync(result, '');
 }
 
 async function editCell(frame: FrameEntry, key: keyof FrameEntry, raw: string, numeric = true) {
   const value = numeric ? Number(raw) : raw;
-  await patch(frame.frameNo, { [key]: value } as Partial<FrameEntry>);
+  const result = await patch(frame.frameNo, { [key]: value } as Partial<FrameEntry>);
+  if (result?.kept) flashSync(result, '');
 }
 
 async function removeFrameRow(frameNo: number) {
-  await removeAt(frameNo);
-  flash('已删除该帧并重排序号');
+  const result = await removeAt(frameNo);
+  flashSync(result, '已删除该帧并重排序号');
+}
+
+async function recalcRange() {
+  const result = await syncShotRange();
+  flashSync(result, '已按每帧拍摄张数重算帧区间、时长与计划张数');
 }
 
 async function submitTake() {
@@ -306,7 +320,7 @@ function speedOf(frame: FrameEntry) {
           <h2>帧条目表格</h2>
           <div class="head-actions">
             <button type="button" class="btn small" data-testid="insert-frame" @click="addFrameWithExposure">插入帧</button>
-            <button type="button" class="btn small" @click="syncShotRange">重算时长</button>
+            <button type="button" class="btn small" data-testid="recalc-range" @click="recalcRange">重算时长</button>
           </div>
         </div>
 

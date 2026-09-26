@@ -65,14 +65,19 @@ export const useShotStore = defineStore('shot', {
       this.currentId = id;
       return saved;
     },
-    /** 改时长/帧率后重排帧区间，并同步到该镜头的全部帧条目 */
+    /** 改时长/帧率后重排帧区间，并同步到该镜头的全部帧条目；显式给出 endFrame 时直接采用（如按每帧张数重算） */
     async update(id: number, patch: Partial<Shot>) {
       const existing = this.shots.find((s) => s.id === id);
       if (!existing) return;
       const next = toPlain({ ...existing, ...patch });
-      const range = buildFrameRange(next.startFrame, next.durationSec, next.fps);
-      next.startFrame = range.startFrame;
-      next.endFrame = range.endFrame;
+      if (typeof patch.endFrame === 'number' && Number.isFinite(patch.endFrame)) {
+        next.startFrame = Number.isFinite(next.startFrame) && next.startFrame >= 1 ? Math.floor(next.startFrame) : 1;
+        next.endFrame = Math.max(next.startFrame, Math.floor(patch.endFrame));
+      } else {
+        const range = buildFrameRange(next.startFrame, next.durationSec, next.fps);
+        next.startFrame = range.startFrame;
+        next.endFrame = range.endFrame;
+      }
       await api.updateShot(id, next);
       this.shots = this.shots.map((s) => (s.id === id ? { ...next, id } : s));
       await this.rerangeFrames(id);

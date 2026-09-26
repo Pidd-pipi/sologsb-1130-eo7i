@@ -7,11 +7,12 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useShotStore } from '../stores/shotStore';
 import { useFrameStore } from '../stores/frameStore';
-import { useFrameSequence } from '../hooks/useFrameSequence';
+import { useFrameSequence, type RangeSyncResult } from '../hooks/useFrameSequence';
 import { useLocalDraft } from '../hooks/useLocalDraft';
-import { durationToFrames, framesToDuration } from '../utils/frameMath';
+import { framesToDuration, plannedFramesOf } from '../utils/frameMath';
 import { APERTURE_OPTIONS, EXPOSURE_OPTIONS, ISO_OPTIONS, SHUTTER_ANGLE_OPTIONS } from '../utils/exposure';
-import type { BatchExposure, FrameEntry } from '../types/frame';
+import type { BatchExposure, FrameEntry, ShotCount } from '../types/frame';
+import { SHOT_COUNT_OPTIONS } from '../types/frame';
 import type { Shot } from '../types/shot';
 import FrameStrip from '../components/common/FrameStrip.vue';
 import ExposureForm from '../components/common/ExposureForm.vue';
@@ -22,7 +23,8 @@ const shotStore = useShotStore();
 const frameStore = useFrameStore();
 const { shots } = storeToRefs(shotStore);
 const { frames, selectedFrameNo } = storeToRefs(frameStore);
-const { insertAfter, removeAt, move, patch, select, syncShotRange, totalDuration, fps } = useFrameSequence();
+const { insertAfter, removeAt, move, patch, applyShotCount, select, syncShotRange, totalShots, totalDuration, fps } =
+  useFrameSequence();
 
 const activeShotId = ref<number | null>(null);
 const feedback = ref('');
@@ -45,12 +47,14 @@ const { draft: batch, reset: resetBatch } = useLocalDraft<BatchExposure>('frame-
 });
 
 const activeShot = computed<Shot | undefined>(() => (activeShotId.value === null ? undefined : shotStore.byId(activeShotId.value)));
-const planned = computed(() => (activeShot.value ? durationToFrames(activeShot.value.durationSec, activeShot.value.fps) : 0));
+const planned = computed(() => (activeShot.value ? plannedFramesOf(activeShot.value) : 0));
 const ordered = computed(() => frames.value.slice().sort((a, b) => a.frameNo - b.frameNo));
 const exposureOptions = EXPOSURE_OPTIONS;
 const apertureOptions = APERTURE_OPTIONS;
 const isoOptions = ISO_OPTIONS;
 const shutterOptions = SHUTTER_ANGLE_OPTIONS;
+const shotCountOptions = SHOT_COUNT_OPTIONS;
+const batchShotCount = ref<ShotCount>(2);
 
 onMounted(async () => {
   if (!shotStore.ready) await shotStore.load();
@@ -72,15 +76,22 @@ function flash(text: string) {
   }, 3200);
 }
 
+/** 重算结果反馈：已实拍超出新计划时说明超出张数并保留原计划 */
+function flashSync(result: RangeSyncResult | null | undefined, okText: string) {
+  if (result?.kept) {
+    flash(`新计划 ${result.planned} 张，已实拍 ${result.taken} 张，超出 ${result.overBy} 张，已保留原计划`);
+  } else {
+    flash(okText);
+  }
+}
+
 async function doInsert() {
   if (activeShotId.value === null) return;
-  await insertAfter(selectedFrameNo.value);
+  const inserted = await insertAfter(selectedFrameNo.value);
   const created = frames.value.find((f) => f.frameNo === (selectedFrameNo.value ?? 0) + 1) ?? frames.value[frames.value.length - 1];
-  if (created) {
-    await patch(created.frameNo, newFrame.value);
-    select(created.frameNo);
-  }
-  flash('已插入一帧并重排序号');
+  const patched = created ? await patch(created.frameNo, newFrame.value) : null;
+  if (created) select(created.frameNo);
+  flashSync(patched ?? inserted, '已插入一帧并重排序号');
 }
 
 async function doRemove() {
@@ -88,13 +99,13 @@ async function doRemove() {
     flash('请先点选要删除的帧');
     return;
   }
-  await removeAt(selectedFrameNo.value);
-  flash('已删除该帧并重排序号');
+  const result = await removeAt(selectedFrameNo.value);
+  flashSync(result, '已删除该帧并重排序号');
 }
 
 async function doReorder(from: number, to: number) {
-  await move(from, to);
-  flash(`已把第 ${from + 1} 个色块移动到第 ${to + 1} 位`);
+  const result = await move(from, to);
+  flashSync(result, `已把第 ${from + 1} 个色块移动到第 ${to + 1} 位`);
 }
 
 async function doBatch() {
@@ -114,7 +125,20 @@ async function doBatchSelectedOnly() {
 }
 
 async function patchFrame(frameNo: number, value: Partial<FrameEntry>) {
-  await patch(frameNo, value);
+  const result = await patch(frameNo, value);
+  if (result?.kept) flashSync(result, '');
+}
+
+/** 整段套用拍摄张数：每帧都按该张数拍摄，并重算帧区间、时长与计划张数 */
+async function doBatchShotCount() {
+  if (activeShotId.value === null) return;
+  const result = await applyShotCount(batchShotCount.value);
+  flashSync(result, `已把整段 ${frames.value.length} 帧调整为 ${batchShotCount.value} 张，并重算帧区间与时长`);
+}
+
+async function recalcRange() {
+  const result = await syncShotRange();
+  flashSync(result, '已按每帧拍摄张数重算帧区间、时长与计划张数');
 }
 
 function shiftFrame(frame: FrameEntry, dir: -1 | 1) {
@@ -153,7 +177,8 @@ function shiftFrame(frame: FrameEntry, dir: -1 | 1) {
       <div class="stat-row">
         <div class="stat"><span class="label">镜号</span><span class="value small mono">{{ activeShot.code }}</span></div>
         <div class="stat"><span class="label">条带帧数</span><span class="value">{{ frames.length }}</span></div>
-        <div class="stat"><span class="label">计划张数</span><span class="value">{{ planned }}</span></div>
+        <div class="stat"><span class="label">总张数</span><span class="value" data-testid="board-total-shots">{{ totalShots }}</span></div>
+        <div class="stat"><span class="label">计划张数</span><span class="value" data-testid="board-planned">{{ planned }}</span></div>
         <div class="stat"><span class="label">当前时长</span><span class="value small">{{ totalDuration }} s</span></div>
         <div class="stat"><span class="label">帧率</span><span class="value small">{{ fps }} fps</span></div>
       </div>
@@ -164,7 +189,7 @@ function shiftFrame(frame: FrameEntry, dir: -1 | 1) {
           <div class="head-actions">
             <button type="button" class="btn small" data-testid="board-insert" @click="doInsert">插入帧</button>
             <button type="button" class="btn small danger" data-testid="board-remove" @click="doRemove">删除选中帧</button>
-            <button type="button" class="btn small" @click="syncShotRange">重算时长</button>
+            <button type="button" class="btn small" data-testid="board-recalc" @click="recalcRange">重算时长</button>
           </div>
         </div>
         <FrameStrip :frames="ordered" :selected="selectedFrameNo" @update:selected="select" @reorder="doReorder" @patch="patchFrame" />
@@ -204,6 +229,16 @@ function shiftFrame(frame: FrameEntry, dir: -1 | 1) {
             <button type="button" class="btn" @click="doBatchSelectedOnly">仅套用到选中帧</button>
             <button type="button" class="btn" @click="resetBatch">复位参数</button>
           </div>
+          <div class="shotcount-apply">
+            <label class="field">
+              <span>拍摄张数（每帧）</span>
+              <select v-model.number="batchShotCount" data-testid="batch-shotcount">
+                <option v-for="c in shotCountOptions" :key="c" :value="c">{{ c }} 张</option>
+              </select>
+            </label>
+            <button type="button" class="btn" data-testid="batch-shotcount-apply" @click="doBatchShotCount">整段套用张数</button>
+            <span class="muted">套用后按总张数重算帧区间、时长与计划张数</span>
+          </div>
         </div>
 
         <div class="panel">
@@ -234,7 +269,10 @@ function shiftFrame(frame: FrameEntry, dir: -1 | 1) {
             </tr>
           </tbody>
         </table>
-        <p class="muted">按帧率 {{ fps }} fps 计算，当前帧序等效时长 {{ framesToDuration(ordered.length, fps) }} s。</p>
+        <p class="muted">
+          共 {{ ordered.length }} 帧条目，合计 {{ totalShots }} 张；按帧率 {{ fps }} fps 计算，等效时长
+          {{ framesToDuration(totalShots, fps) }} s。
+        </p>
       </div>
     </template>
   </section>
@@ -350,6 +388,20 @@ h1 {
   display: flex;
   gap: 10px;
   margin-top: 12px;
+}
+.shotcount-apply {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e2e7ef;
+}
+.shotcount-apply .field {
+  min-width: 140px;
+}
+.shotcount-apply .muted {
+  padding-bottom: 8px;
 }
 .table {
   width: 100%;
