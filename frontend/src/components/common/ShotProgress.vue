@@ -13,6 +13,8 @@ interface Props {
   wasted?: number;
   remaining?: number;
   percent?: number;
+  /** 已拍超出新计划的张数（>0 时展示提示） */
+  overshoot?: number;
   compact?: boolean;
   status?: string;
 }
@@ -22,6 +24,7 @@ const props = withDefaults(defineProps<Props>(), {
   wasted: 0,
   remaining: undefined,
   percent: undefined,
+  overshoot: 0,
   compact: false,
   status: '',
 });
@@ -60,6 +63,7 @@ const barColor = computed(() => {
       <span>已拍 {{ taken }} 张</span>
       <span v-if="wasted">废帧 {{ wasted }} 张</span>
       <span>剩余 {{ remainingValue }} 张</span>
+      <span v-if="overshoot > 0" class="overshoot" data-testid="progress-overshoot">已拍超出新计划 {{ overshoot }} 张</span>
     </div>
   </div>
 </template>
@@ -106,6 +110,10 @@ const barColor = computed(() => {
   gap: 14px;
   font-size: 12px;
   color: #5a6472;
+}
+.overshoot {
+  color: #c45656;
+  font-weight: 600;
 }
 .compact .stats {
   gap: 10px;

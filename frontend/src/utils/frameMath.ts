@@ -15,6 +15,14 @@ export function framesToDuration(frames: number, fps: number): number {
   return Math.round((frames / fps) * 1000) / 1000;
 }
 
+/** 计划拍摄张数：逐帧拍摄张数求和，每帧至少按 1 张计 */
+export function plannedCaptures(frames: Array<{ shotCount: number }>): number {
+  return frames.reduce((sum, f) => {
+    const n = Number.isFinite(f.shotCount) ? Math.floor(f.shotCount) : 1;
+    return sum + Math.max(1, n);
+  }, 0);
+}
+
 /** 由起始帧号与时长算出区间；起始帧号非法时回落到 1 */
 export function buildFrameRange(startFrame: number, durationSec: number, fps: number) {
   const start = Number.isFinite(startFrame) && startFrame >= 1 ? Math.floor(startFrame) : 1;

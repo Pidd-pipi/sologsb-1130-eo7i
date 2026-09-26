@@ -10,9 +10,9 @@ import { storeToRefs } from 'pinia';
 import { useShotStore } from '../stores/shotStore';
 import { useFrameStore } from '../stores/frameStore';
 import { useFrameSequence } from '../hooks/useFrameSequence';
-import { useProgress } from '../hooks/useProgress';
+import { useProgress, shotPlannedFrames } from '../hooks/useProgress';
 import * as api from '../db/api';
-import { durationToFrames, estimateSpeed, framesToDuration } from '../utils/frameMath';
+import { estimateSpeed, framesToDuration } from '../utils/frameMath';
 import { FIXATION_OPTIONS, type Fixation, type PropState } from '../types/prop';
 import { SHOT_STATUS_OPTIONS, type ShotStatus } from '../types/shot';
 import type { FrameEntry } from '../types/frame';
@@ -31,7 +31,7 @@ const frameStore = useFrameStore();
 const { frames, selectedFrameNo } = storeToRefs(frameStore);
 
 const { insertAfter, removeAt, move, patch, select, syncShotRange } = useFrameSequence();
-const { registerTake, summaries, loadTakes, computeProgress } = useProgress();
+const { registerTake, summaries, loadTakes } = useProgress();
 
 const props = ref<PropState[]>([]);
 const takeForm = ref({ date: today(), takenFrames: 8, wastedFrames: 0 });
@@ -42,7 +42,7 @@ const notFound = ref(false);
 
 const shotId = computed(() => Number(route.params.id));
 const shot = computed(() => shotStore.byId(shotId.value));
-const planned = computed(() => (shot.value ? durationToFrames(shot.value.durationSec, shot.value.fps) : 0));
+const planned = computed(() => (shot.value ? shotPlannedFrames(shot.value) : 0));
 const summary = computed(() => summaries.value.find((s) => s.shotId === shotId.value));
 const sceneProgress = computed(() =>
   shot.value ? framesToDuration(shot.value.endFrame - shot.value.startFrame + 1, shot.value.fps) : 0,
@@ -104,9 +104,9 @@ async function changeDuration(value: number) {
 
 async function changeFps(value: number) {
   if (!shot.value) return;
-  await shotStore.update(shotId.value, { fps: value });
+  await shotStore.setFps(shotId.value, value);
   await syncShotRange();
-  flash('已按新帧率重排帧区间');
+  flash('已按新帧率重算时长与帧区间');
 }
 
 async function addFrameWithExposure() {
@@ -125,7 +125,10 @@ async function reorder(from: number, to: number) {
 }
 
 async function patchFrame(frameNo: number, value: Partial<FrameEntry>) {
-  await patch(frameNo, value);
+  const result = await patch(frameNo, value);
+  if (result && !result.applied) {
+    flash(`已保留原计划：已拍 ${result.taken} 张，超出新计划 ${result.overshoot} 张`);
+  }
 }
 
 async function editCell(frame: FrameEntry, key: keyof FrameEntry, raw: string, numeric = true) {
@@ -148,7 +151,12 @@ async function submitTake() {
   }
   await registerTake(shot.value, takeForm.value.date, taken, wasted);
   await loadTakes();
-  flash(`已登记 ${taken} 张实拍，进度已回写`);
+  const s = summaries.value.find((x) => x.shotId === shotId.value);
+  if (s && s.overshoot > 0) {
+    flash(`已登记 ${taken} 张实拍；已拍超出新计划 ${s.overshoot} 张`);
+  } else {
+    flash(`已登记 ${taken} 张实拍，进度已回写`);
+  }
 }
 
 async function addProp() {
@@ -190,9 +198,9 @@ const selectedProps = computed(() => (selectedFrameNo.value === null ? [] : prop
 const takeRows = computed(() => summaries.value.find((s) => s.shotId === shotId.value));
 const consumed = computed(() => {
   const s = takeRows.value;
-  if (s) return computeProgress(s.planned, s.taken, s.wasted);
+  if (s) return s;
   const plan = planned.value;
-  return { planned: plan, taken: 0, wasted: 0, remaining: plan, percent: 0 };
+  return { planned: plan, taken: 0, wasted: 0, remaining: plan, percent: 0, overshoot: 0 };
 });
 
 function speedOf(frame: FrameEntry) {
@@ -276,6 +284,7 @@ function speedOf(frame: FrameEntry) {
             :wasted="consumed.wasted"
             :remaining="consumed.remaining"
             :percent="consumed.percent"
+            :overshoot="consumed.overshoot"
           />
         </div>
       </div>

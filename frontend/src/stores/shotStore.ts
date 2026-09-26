@@ -77,6 +77,27 @@ export const useShotStore = defineStore('shot', {
       this.shots = this.shots.map((s) => (s.id === id ? { ...next, id } : s));
       await this.rerangeFrames(id);
     },
+    /**
+     * 把帧序重算出的时长与帧区间精确写入镜头。
+     * 不经 durationSec 反推帧数，避免 30fps 等帧率下向上取整漂移。
+     */
+    async applyPlan(id: number, plan: { durationSec: number; startFrame: number; endFrame: number }) {
+      const existing = this.shots.find((s) => s.id === id);
+      if (!existing) return;
+      const next = toPlain({ ...existing, ...plan });
+      await api.updateShot(id, {
+        durationSec: next.durationSec,
+        startFrame: next.startFrame,
+        endFrame: next.endFrame,
+      });
+      this.shots = this.shots.map((s) => (s.id === id ? { ...next, id } : s));
+      await this.rerangeFrames(id);
+    },
+    /** 仅更新帧率；帧区间与时长交给帧序重算（拍摄张数不变，只换算秒数） */
+    async setFps(id: number, fps: number) {
+      await api.updateShot(id, { fps });
+      this.shots = this.shots.map((s) => (s.id === id ? { ...s, fps, updatedAt: Date.now() } : s));
+    },
     /** 把帧序号重新压缩进 [startFrame, endFrame]，并重算时长 */
     async rerangeFrames(shotId: number) {
       const shot = this.shots.find((s) => s.id === shotId);

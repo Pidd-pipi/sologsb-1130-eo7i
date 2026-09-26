@@ -142,6 +142,7 @@ function goDetail(id: number | undefined) {
                 :wasted="row.summary?.wasted ?? 0"
                 :remaining="row.summary?.remaining ?? 0"
                 :percent="row.summary?.percent ?? 0"
+                :overshoot="row.summary?.overshoot ?? 0"
               />
             </td>
             <td>{{ row.shot.owner || '未指派' }}</td>

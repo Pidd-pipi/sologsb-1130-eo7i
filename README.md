@@ -1,6 +1,6 @@
 # 定格动画拍摄帧序编排台（gbstopmotion）
 
-面向定格动画的动画师与摄影助理，把镜头拆分、逐帧位移量与拍摄参数记录成可执行的拍摄清单：新建镜头后按帧率与时长自动排帧区间，在帧序条带上插入、删除、移动帧并重算时长，随拍随记曝光参数与实拍张数。
+面向定格动画的动画师与摄影助理，把镜头拆分、逐帧位移量与拍摄参数记录成可执行的拍摄清单：新建镜头后按帧率与时长自动排帧区间，在帧序条带上插入、删除、移动帧并重算时长，随拍随记曝光参数与实拍张数。每帧的拍摄张数（1/2/3 张）参与镜头计划：逐帧调整或整段套用时，帧区间、预计时长与计划张数同步重算，镜头详情、进度总览与实拍记录读取同一份结果；已拍张数超过新计划时保留原计划，并提示超出多少。
 
 ## Docker 一键启动
 
@@ -23,7 +23,7 @@ docker compose down
 | --- | --- |
 | 框架 | Vue 3（`<script setup>` + TypeScript） |
 | 构建 | Vite 5 + `vue-tsc -b`（类型检查零错误） |
-| 状态 | Pinia（`shotStore` / `frameStore` / `uiStore`） |
+| 状态 | Pinia（`shotStore` / `frameStore` / `progressStore` / `uiStore`） |
 | 路由 | Vue Router 4（HTML5 History，nginx `try_files` 兜底） |
 | UI | Element Plus + 自研轻量组件 |
 | 本地存储 | IndexedDB（Dexie，库名 `gbstopmotion-db`）+ localStorage（表单草稿） |
@@ -41,7 +41,7 @@ sologsb-1130/
     ├── public/favicon.svg
     └── src/
         ├── types/{shot,frame,prop,take}.ts        # 4 个数据模型
-        ├── stores/{shotStore,frameStore,uiStore}.ts
+        ├── stores/{shotStore,frameStore,progressStore,uiStore}.ts
         ├── components/common/{FrameStrip,ExposureForm,ShotProgress,StatusTag,EmptyState}.vue
         ├── hooks/{useFrameSequence,useProgress,useLocalDraft}.ts
         ├── pages/{Overview,ShotNew,ShotDetail,FrameBoard,PropTrack,TakeLog}.vue
@@ -57,7 +57,7 @@ sologsb-1130/
 | `/` | 进度总览 | 各镜头状态、帧数、预计时长、完成百分比，累计全片张数与待拍张数 |
 | `/shots/new` | 新建镜头 | 填写镜号、场景名、帧率与时长，保存后生成帧区间与首位帧条目 |
 | `/shots/:id` | 镜头详情 | 镜头参数与进度、帧序条带、帧条目表格、道具轨迹、登记实拍 |
-| `/frames` | 帧序编排台 | 移动/插入/删除帧、批量套用曝光，改动后重算序号与总时长 |
+| `/frames` | 帧序编排台 | 移动/插入/删除帧、批量套用曝光与拍摄张数，改动后重算帧区间、序号与总时长 |
 | `/props` | 道具位移轨迹 | 按镜头与帧区间登记 X/Y/Z 与旋转角度，曲线预览累计位移 |
 | `/progress` | 实拍记录 | 登记当日实拍张数与废帧数，回写完成百分比并提示剩余张数 |
 

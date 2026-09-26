@@ -2,8 +2,8 @@
 import { defineStore } from 'pinia';
 import * as api from '../db/api';
 import { toPlain } from '../db';
-import { accumulateOffsets, estimateSpeed, frameColor, framesToDuration } from '../utils/frameMath';
-import type { BatchExposure, FrameEntry } from '../types/frame';
+import { accumulateOffsets, estimateSpeed, frameColor, framesToDuration, plannedCaptures } from '../utils/frameMath';
+import type { BatchExposure, FrameEntry, ShotCount } from '../types/frame';
 import { createEmptyFrame } from '../types/frame';
 
 interface FrameState {
@@ -32,13 +32,13 @@ export const useFrameStore = defineStore('frame', {
     offsets(state): number[] {
       return accumulateOffsets(state.frames.map((f) => f.propOffsetMm));
     },
-    /** 整段帧序按张数折算的总时长（秒） */
-    totalDuration(state): number {
-      return Math.round(state.frames.reduce((sum, f) => sum + 1 / (f.shotCount || 1), 0) * 100) / 100;
+    /** 整段帧序的计划拍摄张数（逐帧拍摄张数求和） */
+    plannedCaptures(state): number {
+      return plannedCaptures(state.frames);
     },
-    /** 帧序在给定帧率下的实际时长（秒） */
+    /** 帧序在给定帧率下的实际时长（秒）：计划张数 ÷ 帧率 */
     durationAtFps(state) {
-      return (fps: number) => framesToDuration(state.frames.length, fps);
+      return (fps: number) => framesToDuration(plannedCaptures(state.frames), fps);
     },
   },
   actions: {
@@ -114,6 +114,15 @@ export const useFrameStore = defineStore('frame', {
           shutterAngle: batch.shutterAngle,
           updatedAt: Date.now(),
         };
+      });
+      await this.persist();
+    },
+    /** 批量套用拍摄张数（整段或指定帧）；镜头计划由 useFrameSequence 联动重算 */
+    async applyShotCount(shotCount: ShotCount, indexes?: number[]) {
+      const target = indexes && indexes.length ? new Set(indexes) : null;
+      this.frames = this.frames.map((f, idx) => {
+        if (target && !target.has(idx)) return f;
+        return { ...f, shotCount, updatedAt: Date.now() };
       });
       await this.persist();
     },

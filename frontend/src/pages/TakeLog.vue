@@ -56,7 +56,12 @@ async function submit() {
   }
   await registerTake(shot, form.value.date, taken, wasted);
   await loadTakes();
-  flash(`${shot.code} 已登记 ${taken} 张，完成度回写为 ${selectedSummary.value?.percent ?? 0}%`);
+  const s = selectedSummary.value;
+  if (s && s.overshoot > 0) {
+    flash(`${shot.code} 已登记 ${taken} 张；已拍超出新计划 ${s.overshoot} 张`);
+  } else {
+    flash(`${shot.code} 已登记 ${taken} 张，完成度回写为 ${s?.percent ?? 0}%`);
+  }
 }
 
 async function removeRow(row: TakeLog) {
@@ -110,6 +115,7 @@ async function removeRow(row: TakeLog) {
             <button type="button" class="btn primary" data-testid="take-log-submit" @click="submit">登记实拍</button>
             <span class="muted" v-if="selectedSummary">
               计划 {{ selectedSummary.planned }} 张 · 已拍 {{ selectedSummary.taken }} 张 · 剩余 {{ selectedSummary.remaining }} 张
+              <template v-if="selectedSummary.overshoot > 0"> · 超出新计划 {{ selectedSummary.overshoot }} 张</template>
             </span>
           </div>
         </div>
@@ -125,6 +131,7 @@ async function removeRow(row: TakeLog) {
             :wasted="selectedSummary.wasted"
             :remaining="selectedSummary.remaining"
             :percent="selectedSummary.percent"
+            :overshoot="selectedSummary.overshoot"
           />
           <p v-else class="muted">请选择镜头。</p>
 
